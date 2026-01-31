@@ -1,5 +1,5 @@
 ; ============================================================================
-; LOADBMP.ASM (v 1.2) - BMP Image Viewer for Olivetti Prodest PC1
+; LOADBMP.ASM (v 1.1) - BMP Image Viewer for Olivetti Prodest PC1
 ; Hidden 160x200x16 Graphics Mode
 ; Written for NASM - NEC V40 (80186 compatible)
 ; By Retro Erik - 2026 using VS Code with Co-Pilot
@@ -214,30 +214,21 @@ main:
 ; ============================================================================
 ; enable_graphics_mode - Olivetti Prodest PC1 hidden 160x200x16 graphics mode
 ; ============================================================================
-; CHANGE LOG (v1.1):
-;   Removed BIOS INT 10h call and register 0x67 write to preserve
-;   horizontal position set by PERITEL.COM. The old code was:
-;
-;   ; BIOS Mode 4: CGA 320x200 graphics
-;   ; mov ax, 0x0004
-;   ; int 0x10
-;   ;
-;   ; Configure V6355D register 0x67
-;   ; mov al, 0x67
-;   ; out PORT_REG_ADDR, al
-;   ; jmp short $+2
-;   ; mov al, 0x18            ; 8-bit bus mode
-;   ; out PORT_REG_DATA, al
-;   ; jmp short $+2
-;
-;   Problem: BIOS INT 10h resets V6355D registers, and then writing
-;   0x18 to register 0x67 would override any custom setting.
-;   PERITEL.COM sets register 0x67 = 0x18 for max rightward position.
-;   By skipping both, we preserve whatever PERITEL set.
-; ============================================================================
 enable_graphics_mode:
     push ax
     push dx
+    
+    ; BIOS Mode 4: CGA 320x200 graphics
+    mov ax, 0x0004
+    int 0x10
+    
+    ; Configure V6355D register 0x67
+    mov al, 0x67
+    out PORT_REG_ADDR, al
+    jmp short $+2
+    mov al, 0x18            ; 8-bit bus mode
+    out PORT_REG_DATA, al
+    jmp short $+2
     
     ; Set monitor control register 0x65
     mov al, 0x65
@@ -266,23 +257,16 @@ enable_graphics_mode:
 ; ============================================================================
 ; disable_graphics_mode - Reset V6355 registers
 ; ============================================================================
-; CHANGE LOG (v1.1):
-;   Removed register 0x67 reset to preserve horizontal position.
-;   The old code was:
-;
-;   ; mov al, 0x67
-;   ; out PORT_REG_ADDR, al
-;   ; jmp short $+2
-;   ; mov al, 0x00
-;   ; out PORT_REG_DATA, al
-;   ; jmp short $+2
-;
-;   By skipping this, PERITEL's horizontal position setting persists
-;   after exiting LOADBMP.
-; ============================================================================
 disable_graphics_mode:
     push ax
     push dx
+    
+    mov al, 0x67
+    out PORT_REG_ADDR, al
+    jmp short $+2
+    mov al, 0x00
+    out PORT_REG_DATA, al
+    jmp short $+2
     
     mov al, 0x65
     out PORT_REG_ADDR, al

@@ -2,8 +2,8 @@
 
 **BMP Image Viewer for Olivetti Prodest PC1**
 
-A utility to display BMP images on the Olivetti Prodest PC1 using its hidden 160x200x16 graphics mode.It only accepts 160x200 and 320x200 in 4 bit.
-320x200 images is downscaled by removing every other horizontal pixel.
+A utility to display BMP images on the Olivetti Prodest PC1 using its hidden 160x200x16 graphics mode. It only accepts 160x200 and 320x200 in 4-bit color.
+320x200 images are downscaled by removing every other horizontal pixel.
 
 ![Olivetti Prodest PC1](https://img.shields.io/badge/Platform-Olivetti%20Prodest%20PC1-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -15,6 +15,23 @@ A utility to display BMP images on the Olivetti Prodest PC1 using its hidden 160
 - Automatic downscaling of 320-pixel wide images to 160 pixels
 - Custom palette support from BMP files
 - Clean exit with CGA palette restoration
+- **C64-style loading effects:**
+  - Pilot/search phase with cyan/red border flashing
+  - Border color cycling during image loading
+  - White flash on loading completion
+- **PERITEL.COM compatible** (v1.1): Preserves horizontal position setting
+
+## Version History
+
+### v1.2 (January 2026)
+- **Fixed**: No longer overrides horizontal position set by PERITEL.COM
+- Removed BIOS INT 10h call that was resetting V6355D registers
+- Removed register 0x67 writes to preserve PERITEL's setting
+- Run `PERITEL.COM` before `LOADBMP` for optimal screen centering
+
+### v1.0 (January 2026)
+- Initial release
+- BMP loading with C64-style effects
 
 ## Requirements
 

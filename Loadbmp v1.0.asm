@@ -1,5 +1,5 @@
 ; ============================================================================
-; LOADBMP.ASM (v 1.2) - BMP Image Viewer for Olivetti Prodest PC1
+; LOADBMP.ASM (v 1.0) - BMP Image Viewer for Olivetti Prodest PC1
 ; Hidden 160x200x16 Graphics Mode
 ; Written for NASM - NEC V40 (80186 compatible)
 ; By Retro Erik - 2026 using VS Code with Co-Pilot
@@ -7,12 +7,6 @@
 ; Supports: 4-bit (16-color) BMP files, uncompressed (BI_RGB)
 ; Usage: LOADBMP filename.bmp
 ;        Press any key to exit
-;
-; Features:
-;   - C64-style border color cycling during image loading
-;   - C64-style pilot/search phase with cyan/red border flashing
-;   - C64-style white flash on loading completion
-;   - Supports both 160x200 and 320x200 BMP images (auto-downscale)
 ; ============================================================================
 
 [BITS 16]
@@ -162,10 +156,6 @@ main:
     ; Display BMP image
     call decode_bmp
     
-    ; === C64-style: reset border to black after loading ===
-    xor al, al
-    out PORT_COLOR, al
-    
     ; Enable video output - image appears instantly!
     mov al, 0x4A            ; Graphics mode, video ON
     out PORT_MODE, al
@@ -214,30 +204,21 @@ main:
 ; ============================================================================
 ; enable_graphics_mode - Olivetti Prodest PC1 hidden 160x200x16 graphics mode
 ; ============================================================================
-; CHANGE LOG (v1.1):
-;   Removed BIOS INT 10h call and register 0x67 write to preserve
-;   horizontal position set by PERITEL.COM. The old code was:
-;
-;   ; BIOS Mode 4: CGA 320x200 graphics
-;   ; mov ax, 0x0004
-;   ; int 0x10
-;   ;
-;   ; Configure V6355D register 0x67
-;   ; mov al, 0x67
-;   ; out PORT_REG_ADDR, al
-;   ; jmp short $+2
-;   ; mov al, 0x18            ; 8-bit bus mode
-;   ; out PORT_REG_DATA, al
-;   ; jmp short $+2
-;
-;   Problem: BIOS INT 10h resets V6355D registers, and then writing
-;   0x18 to register 0x67 would override any custom setting.
-;   PERITEL.COM sets register 0x67 = 0x18 for max rightward position.
-;   By skipping both, we preserve whatever PERITEL set.
-; ============================================================================
 enable_graphics_mode:
     push ax
     push dx
+    
+    ; BIOS Mode 4: CGA 320x200 graphics
+    mov ax, 0x0004
+    int 0x10
+    
+    ; Configure V6355D register 0x67
+    mov al, 0x67
+    out PORT_REG_ADDR, al
+    jmp short $+2
+    mov al, 0x18            ; 8-bit bus mode
+    out PORT_REG_DATA, al
+    jmp short $+2
     
     ; Set monitor control register 0x65
     mov al, 0x65
@@ -266,23 +247,16 @@ enable_graphics_mode:
 ; ============================================================================
 ; disable_graphics_mode - Reset V6355 registers
 ; ============================================================================
-; CHANGE LOG (v1.1):
-;   Removed register 0x67 reset to preserve horizontal position.
-;   The old code was:
-;
-;   ; mov al, 0x67
-;   ; out PORT_REG_ADDR, al
-;   ; jmp short $+2
-;   ; mov al, 0x00
-;   ; out PORT_REG_DATA, al
-;   ; jmp short $+2
-;
-;   By skipping this, PERITEL's horizontal position setting persists
-;   after exiting LOADBMP.
-; ============================================================================
 disable_graphics_mode:
     push ax
     push dx
+    
+    mov al, 0x67
+    out PORT_REG_ADDR, al
+    jmp short $+2
+    mov al, 0x00
+    out PORT_REG_DATA, al
+    jmp short $+2
     
     mov al, 0x65
     out PORT_REG_ADDR, al
@@ -536,12 +510,6 @@ decode_bmp:
     or ax, ax               ; Check if we read any bytes
     jz .decode_done         ; EOF reached
     
-    ; === C64-style border activity: update every row ===
-    mov al, [border_ctr]
-    out PORT_COLOR, al
-    inc byte [border_ctr]
-    and byte [border_ctr], 0x0F
-    
     ; Check if we need to downsample
     cmp byte [downsample_flag], 0
     je .no_downsample
@@ -556,7 +524,6 @@ decode_bmp:
     
 .downsample_loop:
     lodsb                   ; AL = [pixel0][pixel1]
-    push ax
     and al, 0xF0            ; AL = [pixel0][0]
     mov ah, al              ; Save pixel0 in AH
     
@@ -566,45 +533,16 @@ decode_bmp:
     
     mov [es:di], al         ; Write directly to video memory
     inc di
-    pop ax
-    
-    ; === C64-style: change border every 10 bytes (8 times per row) ===
-    push ax
-    mov ax, cx
-    and ax, 0x07            ; Every 8 iterations (10 bytes worth)
-    jnz .no_border_ds
-    mov al, [border_ctr]
-    out PORT_COLOR, al
-    inc byte [border_ctr]
-    and byte [border_ctr], 0x0F
-.no_border_ds:
-    pop ax
     
     loop .downsample_loop
     jmp .row_done
     
 .no_downsample:
-    ; Copy 80 bytes for 160-wide images with C64-style border flicker
+    ; Copy first 80 bytes for 160-wide images
     mov si, row_buffer
     mov cx, 80
-    
-.copy_loop:
-    lodsb
-    stosb
-    
-    ; === C64-style: change border every 10 bytes (8 times per row) ===
-    push ax
-    mov ax, cx
-    and ax, 0x07            ; Every 8 iterations
-    jnz .no_border_copy
-    mov al, [border_ctr]
-    out PORT_COLOR, al
-    inc byte [border_ctr]
-    and byte [border_ctr], 0x0F
-.no_border_copy:
-    pop ax
-    
-    loop .copy_loop
+    cld
+    rep movsb
     
 .row_done:
     
@@ -630,7 +568,7 @@ decode_bmp:
 ; Data Section
 ; ============================================================================
 
-msg_info    db 'LOADBMP v1.1 - BMP Image Viewer for Olivetti Prodest PC1', 0x0D, 0x0A
+msg_info    db 'LOADBMP v1.0 - BMP Image Viewer for Olivetti Prodest PC1', 0x0D, 0x0A
             db 0x0D, 0x0A
             db 'Displays BMP images in 160x200 16-color mode.', 0x0D, 0x0A
             db 'Supports 160x200 and 320x200 BMP images (16 colors only).', 0x0D, 0x0A
@@ -638,7 +576,7 @@ msg_info    db 'LOADBMP v1.1 - BMP Image Viewer for Olivetti Prodest PC1', 0x0D,
             db 'Usage: LOADBMP filename.bmp', 0x0D, 0x0A
             db '       LOADBMP /? or /h for this help', 0x0D, 0x0A
             db 0x0D, 0x0A
-            db 'By RetroErik - 2026', 0x0D, 0x0A, '$'
+            db 'RetroErik 2026', 0x0D, 0x0A, '$'
 msg_file_err db 'Error: Cannot open file', 0x0D, 0x0A, '$'
 msg_not_bmp db 'Error: Not a valid BMP file', 0x0D, 0x0A, '$'
 msg_format  db 'Error: BMP must be 4-bit uncompressed', 0x0D, 0x0A, '$'
@@ -650,7 +588,6 @@ image_height    dw 0
 bytes_per_row   dw 0
 current_row     dw 0
 downsample_flag db 0            ; 1 if we need to downsample 320->160
-border_ctr      db 0            ; Border color cycling counter (0-15) for C64-style loading
 
 ; ============================================================================
 ; Standard CGA text mode palette (16 colors)

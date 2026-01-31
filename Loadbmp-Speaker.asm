@@ -1,5 +1,5 @@
 ; ============================================================================
-; LOADBMP.ASM (v 1.2) - BMP Image Viewer for Olivetti Prodest PC1
+; LOADBMP.ASM (v 1.1a) - BMP Image Viewer for Olivetti Prodest PC1
 ; Hidden 160x200x16 Graphics Mode
 ; Written for NASM - NEC V40 (80186 compatible)
 ; By Retro Erik - 2026 using VS Code with Co-Pilot
@@ -9,10 +9,10 @@
 ;        Press any key to exit
 ;
 ; Features:
-;   - C64-style border color cycling during image loading
-;   - C64-style pilot/search phase with cyan/red border flashing
-;   - C64-style white flash on loading completion
-;   - Supports both 160x200 and 320x200 BMP images (auto-downscale)
+;   - C64-style border color cycling during load (working)
+;   - C64-style pilot/search phase with cyan/red flashing (working)
+;   - C64-style completion flash (working)
+;   - C64-style loading sounds (NOT YET WORKING - causes crash)
 ; ============================================================================
 
 [BITS 16]
@@ -47,6 +47,29 @@ BMP_PALETTE_OFFSET equ 54       ; Palette starts here (for 4-bit BMP)
 
 SCREEN_WIDTH    equ 160
 SCREEN_HEIGHT   equ 200
+
+; ============================================================================
+; Optional Features (comment out to disable)
+; ============================================================================
+%define BORDER_PHASES           ; Enable C64-style pilot/completion effects
+;%define BORDER_SOUND           ; C64-style loading sounds
+                                ; NOTE: BORDER_SOUND causes crash on PC1 hardware.
+                                ; Pilot tone works once, but second speaker_on call
+                                ; crashes the system. May be PC1-specific PIT/speaker
+                                ; incompatibility. Needs further investigation.
+
+; C64-style border colors for pilot phase
+PILOT_COLOR1    equ 3           ; Cyan
+PILOT_COLOR2    equ 4           ; Red
+PILOT_LOOPS     equ 8           ; Number of pilot alternations (~300ms)
+
+; PC Speaker / PIT constants
+PIT_CTRL        equ 0x43        ; PIT control port
+PIT_CH2         equ 0x42        ; PIT channel 2 (speaker)
+SPEAKER_PORT    equ 0x61        ; Speaker control port
+PILOT_FREQ      equ 2000        ; Pilot tone frequency divisor (~600 Hz)
+CHIRP_BASE      equ 4000        ; Base chirp frequency divisor (~300 Hz)
+CHIRP_RANGE     equ 500         ; Chirp variation range
 
 ; ============================================================================
 ; Main Program Entry Point
@@ -146,6 +169,19 @@ main:
     int 0x21
     jc .file_error
     
+%ifdef BORDER_PHASES
+    ; === Phase A: Pilot/Search - alternate cyan/red in text mode ===
+    call pilot_phase
+%endif
+    
+%ifdef BORDER_SOUND
+    ; Start continuous loading tone (before graphics mode)
+    push ax
+    mov ax, CHIRP_BASE
+    call speaker_on
+    pop ax
+%endif
+    
     ; Enable graphics mode (starts with video blanked)
     call enable_graphics_mode
     
@@ -162,9 +198,17 @@ main:
     ; Display BMP image
     call decode_bmp
     
+%ifdef BORDER_PHASES
+    ; === Phase C: Completion blink - flash white then black ===
+    call completion_blink
+%else
+  %ifdef BORDER_SOUND
+    call speaker_off
+  %endif
     ; === C64-style: reset border to black after loading ===
     xor al, al
     out PORT_COLOR, al
+%endif
     
     ; Enable video output - image appears instantly!
     mov al, 0x4A            ; Graphics mode, video ON
@@ -211,33 +255,175 @@ main:
     mov ax, 0x4C01
     int 0x21
 
+%ifdef BORDER_PHASES
+; ============================================================================
+; pilot_phase - C64-style pilot/search border effect
+; Alternates between two colors for ~300ms while still in text mode
+; This mimics the C64 tape loader "searching" phase
+; ============================================================================
+pilot_phase:
+    push ax
+    push cx
+    push dx
+    
+%ifdef BORDER_SOUND
+    ; Start pilot tone
+    mov ax, PILOT_FREQ
+    call speaker_on
+%endif
+    
+    mov cl, PILOT_LOOPS     ; Number of alternations
+    
+.pilot_loop:
+    ; Color 1 (cyan)
+    mov al, PILOT_COLOR1
+    out PORT_COLOR, al
+    call short_delay
+    
+    ; Color 2 (red)
+    mov al, PILOT_COLOR2
+    out PORT_COLOR, al
+    call short_delay
+    
+    dec cl
+    jnz .pilot_loop
+    
+    ; Reset to black
+    xor al, al
+    out PORT_COLOR, al
+    
+%ifdef BORDER_SOUND
+    ; Stop pilot tone
+    call speaker_off
+%endif
+    
+    pop dx
+    pop cx
+    pop ax
+    ret
+
+; ============================================================================
+; completion_blink - C64-style completion flash
+; Brief white flash then back to black
+; ============================================================================
+completion_blink:
+    push ax
+    push cx
+    
+%ifdef BORDER_SOUND
+    ; Stop loading sound
+    call speaker_off
+%endif
+    
+    ; Flash white
+    mov al, 15              ; White
+    out PORT_COLOR, al
+    call short_delay
+    call short_delay
+    
+    ; Back to black
+    xor al, al
+    out PORT_COLOR, al
+    
+    pop cx
+    pop ax
+    ret
+
+; ============================================================================
+; short_delay - ~20-40ms delay for pilot phase timing
+; Uses BIOS timer tick (18.2 Hz) for consistent timing
+; ============================================================================
+short_delay:
+    push ax
+    push cx
+    push dx
+    
+    ; Read current timer tick
+    xor ax, ax
+    int 0x1A                ; Get timer: CX:DX = tick count
+    mov ax, dx              ; Save low word
+    
+.wait_tick:
+    push ax
+    xor ax, ax
+    int 0x1A                ; Get timer again
+    pop ax
+    cmp dx, ax              ; Has tick changed?
+    je .wait_tick           ; No, keep waiting
+    
+    pop dx
+    pop cx
+    pop ax
+    ret
+%endif
+
+%ifdef BORDER_SOUND
+; ============================================================================
+; speaker_on - Turn on PC speaker with specified frequency
+; Input: AX = PIT divisor (1193180 / frequency)
+; ============================================================================
+speaker_on:
+    push ax
+    push bx
+    
+    mov bx, ax              ; Save divisor in BX
+    
+    ; Set PIT channel 2 to mode 3 (square wave)
+    mov al, 0xB6            ; Channel 2, lobyte/hibyte, mode 3, binary
+    out PIT_CTRL, al
+    jmp short $+2           ; I/O delay
+    
+    ; Load frequency divisor
+    mov al, bl              ; Low byte
+    out PIT_CH2, al
+    jmp short $+2           ; I/O delay
+    mov al, bh              ; High byte
+    out PIT_CH2, al
+    jmp short $+2           ; I/O delay
+    
+    ; Enable speaker (bits 0 and 1 of port 0x61)
+    in al, SPEAKER_PORT
+    or al, 0x03             ; Enable speaker gate and PIT output
+    out SPEAKER_PORT, al
+    jmp short $+2           ; I/O delay
+    
+    pop bx
+    pop ax
+    ret
+
+; ============================================================================
+; speaker_off - Turn off PC speaker
+; ============================================================================
+speaker_off:
+    push ax
+    
+    in al, SPEAKER_PORT
+    and al, 0xFC            ; Disable speaker gate and PIT output
+    out SPEAKER_PORT, al
+    jmp short $+2           ; I/O delay
+    
+    pop ax
+    ret
+%endif
+
 ; ============================================================================
 ; enable_graphics_mode - Olivetti Prodest PC1 hidden 160x200x16 graphics mode
-; ============================================================================
-; CHANGE LOG (v1.1):
-;   Removed BIOS INT 10h call and register 0x67 write to preserve
-;   horizontal position set by PERITEL.COM. The old code was:
-;
-;   ; BIOS Mode 4: CGA 320x200 graphics
-;   ; mov ax, 0x0004
-;   ; int 0x10
-;   ;
-;   ; Configure V6355D register 0x67
-;   ; mov al, 0x67
-;   ; out PORT_REG_ADDR, al
-;   ; jmp short $+2
-;   ; mov al, 0x18            ; 8-bit bus mode
-;   ; out PORT_REG_DATA, al
-;   ; jmp short $+2
-;
-;   Problem: BIOS INT 10h resets V6355D registers, and then writing
-;   0x18 to register 0x67 would override any custom setting.
-;   PERITEL.COM sets register 0x67 = 0x18 for max rightward position.
-;   By skipping both, we preserve whatever PERITEL set.
 ; ============================================================================
 enable_graphics_mode:
     push ax
     push dx
+    
+    ; BIOS Mode 4: CGA 320x200 graphics
+    mov ax, 0x0004
+    int 0x10
+    
+    ; Configure V6355D register 0x67
+    mov al, 0x67
+    out PORT_REG_ADDR, al
+    jmp short $+2
+    mov al, 0x18            ; 8-bit bus mode
+    out PORT_REG_DATA, al
+    jmp short $+2
     
     ; Set monitor control register 0x65
     mov al, 0x65
@@ -266,23 +452,16 @@ enable_graphics_mode:
 ; ============================================================================
 ; disable_graphics_mode - Reset V6355 registers
 ; ============================================================================
-; CHANGE LOG (v1.1):
-;   Removed register 0x67 reset to preserve horizontal position.
-;   The old code was:
-;
-;   ; mov al, 0x67
-;   ; out PORT_REG_ADDR, al
-;   ; jmp short $+2
-;   ; mov al, 0x00
-;   ; out PORT_REG_DATA, al
-;   ; jmp short $+2
-;
-;   By skipping this, PERITEL's horizontal position setting persists
-;   after exiting LOADBMP.
-; ============================================================================
 disable_graphics_mode:
     push ax
     push dx
+    
+    mov al, 0x67
+    out PORT_REG_ADDR, al
+    jmp short $+2
+    mov al, 0x00
+    out PORT_REG_DATA, al
+    jmp short $+2
     
     mov al, 0x65
     out PORT_REG_ADDR, al
@@ -630,7 +809,7 @@ decode_bmp:
 ; Data Section
 ; ============================================================================
 
-msg_info    db 'LOADBMP v1.1 - BMP Image Viewer for Olivetti Prodest PC1', 0x0D, 0x0A
+msg_info    db 'LOADBMP v1.0 - BMP Image Viewer for Olivetti Prodest PC1', 0x0D, 0x0A
             db 0x0D, 0x0A
             db 'Displays BMP images in 160x200 16-color mode.', 0x0D, 0x0A
             db 'Supports 160x200 and 320x200 BMP images (16 colors only).', 0x0D, 0x0A
@@ -638,7 +817,7 @@ msg_info    db 'LOADBMP v1.1 - BMP Image Viewer for Olivetti Prodest PC1', 0x0D,
             db 'Usage: LOADBMP filename.bmp', 0x0D, 0x0A
             db '       LOADBMP /? or /h for this help', 0x0D, 0x0A
             db 0x0D, 0x0A
-            db 'By RetroErik - 2026', 0x0D, 0x0A, '$'
+            db 'RetroErik 2026', 0x0D, 0x0A, '$'
 msg_file_err db 'Error: Cannot open file', 0x0D, 0x0A, '$'
 msg_not_bmp db 'Error: Not a valid BMP file', 0x0D, 0x0A, '$'
 msg_format  db 'Error: BMP must be 4-bit uncompressed', 0x0D, 0x0A, '$'
