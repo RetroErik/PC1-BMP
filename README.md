@@ -75,6 +75,8 @@ This program utilizes the Olivetti Prodest PC1's hidden graphics mode:
 - **Colors**: 16 colors with programmable palette
 - **Video Chip**: V6355D LCD Controller
 
+For comprehensive technical documentation, see [V6355D-Technical-Reference.md](../V6355D-Technical-Reference.md).
+
 ### Memory Layout
 
 The PC1's graphics mode uses CGA-style interlaced memory:
