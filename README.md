@@ -1,4 +1,4 @@
-# LoadBMP
+# PC1-BMP
 
 **BMP Image Viewer for Olivetti Prodest PC1**
 
@@ -27,7 +27,7 @@ A utility to display BMP images on the Olivetti Prodest PC1 using its hidden 160
 - **Fixed**: No longer overrides horizontal position set by PERITEL.COM
 - Removed BIOS INT 10h call that was resetting V6355D registers
 - Removed register 0x67 writes to preserve PERITEL's setting
-- Run `PERITEL.COM` before `LOADBMP` for optimal screen centering
+- Run `PERITEL.COM` before `PC1-BMP` for optimal screen centering
 
 ### v1.0 (January 2026)
 - Initial release
@@ -42,13 +42,13 @@ A utility to display BMP images on the Olivetti Prodest PC1 using its hidden 160
 ## Building
 
 ```bash
-nasm -f bin -o loadbmp.com Loadbmp.asm
+nasm -f bin -o pc1-bmp.com PC1-BMP.asm
 ```
 
 ## Usage
 
 ```
-LOADBMP filename.bmp
+PC1-BMP filename.bmp
 ```
 
 Press any key to exit and return to DOS.
@@ -56,8 +56,8 @@ Press any key to exit and return to DOS.
 ### Help
 
 ```
-LOADBMP /?
-LOADBMP /h
+PC1-BMP /?
+PC1-BMP /h
 ```
 
 ## Supported BMP Format
