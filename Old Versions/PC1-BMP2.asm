@@ -1,51 +1,76 @@
 ; ============================================================================
-; PC1-BMP2.ASM (v 1.0) - BMP Viewer with CGA Palette Flip
+; PC1-BMP2.ASM (v 2.0) - BMP Viewer with HBLANK Palette Reprogramming
 ; ============================================================================
 ;
 ; Displays 320x200 4-bit BMP images on the Olivetti Prodest PC1 using
 ; CGA 320x200x4 mode with per-scanline V6355D palette reprogramming.
 ;
-; THE TECHNIQUE:
+; THE HERO TECHNIQUE(adapted from cgaflip3.asm, proven flicker-free):
 ;   CGA mode 4: 2 bits per pixel, values 0-3.
-;   Pixel 0 = entry 0 (black/border), fixed.
-;   Pixel 1 = entry 2 (even lines) / entry 3 (odd lines)
-;   Pixel 2 = entry 4 (even) / entry 5 (odd)
-;   Pixel 3 = entry 6 (even) / entry 7 (odd)
+;   Always uses palette 0 (no palette flip). Mapping:
+;     Pixel 0 = entry 0 = black (background/border), fixed
+;     Pixel 1 = entry 2 = per-scanline "hero" color (changes every line)
+;     Pixel 2 = entry 4 = global color A (most common, fixed)
+;     Pixel 3 = entry 6 = global color B (2nd most common, fixed)
 ;
-;   Per scanline during the visible area, ALL 8 palette entries are
-;   reprogrammed with the 3 chosen colors for that scanline.
-;   PAL_EVEN/PAL_ODD is flipped via port 0xD9 bit 5 each HBLANK.
+;   During each HBLANK (~80 cycles), only palette entry 2 is updated
+;   with the scanline's hero color (8 OUTs total: open + 4 zeros for
+;   entries 0-1 + 2 bytes for entry 2 + close).
 ;
-;   This allows displaying images with up to 3 unique non-black
-;   colors per scanline (plus black). When a scanline has more than
-;   3 non-black colors, the 3 most frequent are kept and remaining
-;   pixels are remapped to the nearest of {black, color1, color2,
-;   color3} using RGB Manhattan distance.
+;   The two global colors (entries 4 and 6) are programmed once before
+;   the display loop begins and remain constant throughout.
+;
+; KNOWN ISSUE — LEFT-EDGE FLICKER:
+;   The 8 OUTs per scanline take ~99 cycles, but HBLANK is only ~80
+;   cycles on the V6355D at 8 MHz. The last 2-3 OUTs (entry 2 data
+;   bytes and palette close) spill ~19 cycles into the visible area.
+;   This means entry 2 is being written while the leftmost ~20 pixels
+;   are already being drawn, causing brief left-edge flicker.
+;
+; NOTE ON REP OUTSB (tested, does NOT work):
+;   REP OUTSB streams bytes too fast for the V6355D — the chip needs
+;   inter-byte gaps (instruction fetch/decode overhead) to latch each
+;   palette data byte. Without those gaps, palette data is corrupted,
+;   causing MORE flickering than individual OUTs.
+;
+; COLOR SELECTION:
+;   - 2 Global colors: the two most common non-black colors across the
+;     entire image (by total pixel count across all 200 scanlines)
+;   - 1 Hero color per scanline: the most frequent non-black color on
+;     that line that isn't already one of the two global colors
+;   - Remaining colors are remapped to the nearest of {black, hero,
+;     global A, global B} using RGB Manhattan distance
 ;
 ; ALGORITHM:
 ;   1. Load and validate 320x200 4-bit BMP
 ;   2. Convert BMP 16-color BGRA palette to RGB arrays + V6355D format
 ;   3. PASS 1 (Analysis): For each scanline, count pixel color frequency,
-;      pick top 3 most frequent colors, build palette stream table
-;   4. PASS 2 (Render): Re-read BMP, remap each pixel to CGA value 0-3
+;      pick top 3 most frequent. Accumulate global pixel counts.
+;   4. Find 2 global colors (most common across entire image)
+;   5. Build palette stream: choose hero color per line, store V6355D data
+;   6. PASS 2 (Render): Re-read BMP, remap each pixel to CGA value 0-3
 ;      using nearest-color matching, pack into 2bpp CGA VRAM
-;   5. Enter display loop: VSYNC wait + per-scanline HSYNC-synced
-;      palette flip and palette stream (cgaflip4 technique)
+;   7. Program entries 4,6 with global colors (once)
+;   8. Enter display loop: VSYNC wait + per-scanline HSYNC-synced
+;      entry 2 update (cgaflip3 technique)
 ;
-; CGA PALETTE MAPPING (with bg = entry 0):
+; CGA PALETTE ENTRY MAPPING (palette 0 only, no flip):
 ;
-;   Pixel  | Even (pal 0)  | Odd (pal 1)
-;   -------+---------------+--------------
-;     0    | entry 0 (bg)  | entry 0 (bg)    <- both black
-;     1    | entry 2       | entry 3
-;     2    | entry 4       | entry 5
-;     3    | entry 6       | entry 7
-;          | (entry 1 unused -- streamed through)
+;   Pixel  | Entry  | Color
+;   -------+--------+-----------------------------------
+;     0    |   0    | Black (bg/border, fixed)
+;     1    |   2    | Hero color (changes per scanline)
+;     2    |   4    | Global color A (fixed)
+;     3    |   6    | Global color B (fixed)
+;          |  1,3,5,7 unused (streamed-through / not referenced)
 ;
 ; LIMITATIONS:
 ;   - Only 320x200 4-bit uncompressed BMPs supported
 ;   - BMP palette index 0 is always treated as black (background)
-;   - Maximum 3 non-black colors per scanline; excess mapped to nearest
+;   - 2 fixed global colors + 1 per-scanline color + black = 3+1 per line
+;   - Images with many distinct colors per line will have reduced quality
+;   - Left-edge flicker: entry 2 write spills ~19 cycles past HBLANK,
+;     causing brief color glitch on leftmost ~20 pixels using pixel value 1
 ;   - Uses INT 10h mode 4, which resets V6355D registers (not PERITEL
 ;     compatible)
 ;
@@ -75,6 +100,7 @@
 ; ============================================================================
 
 [BITS 16]
+[CPU 186]
 [ORG 0x100]
 
 ; ============================================================================
@@ -108,15 +134,16 @@ BMP_ROW_BYTES   equ 160         ; 320 pixels at 4bpp
 CGA_MODE4_OFF   equ 0x02        ; 320x200 graphics, video OFF
 CGA_MODE4_ON    equ 0x0A        ; 320x200 graphics, video ON
 
-; Palette flip constants
+; Palette select constant (always palette 0, no flip)
 PAL_EVEN        equ 0x00        ; CGA palette 0, bg/border = entry 0
-PAL_ODD         equ 0x20        ; CGA palette 1, bg/border = entry 0
 
 ; ============================================================================
 ; Main Program Entry Point
 ; ============================================================================
 main:
     cld                         ; Clear direction flag for string ops
+    push ds
+    pop es                      ; Ensure ES = DS (safety for .COM)
 
     ; --- Parse command line ---
     mov si, 0x81                ; Command line at PSP:0081
@@ -198,8 +225,8 @@ main:
     ; --- Convert BMP palette to internal format ---
     call convert_bmp_palette
 
-    ; --- Print loading message (while still in text mode) ---
-    mov dx, msg_loading
+    ; --- Print diagnostic messages for debugging ---
+    mov dx, msg_phase1
     mov ah, 0x09
     int 0x21
 
@@ -211,8 +238,24 @@ main:
     int 0x21
     jc .file_error
 
-    ; --- PASS 1: Analyze image (determine 3 colors per scanline) ---
+    ; --- PASS 1: Analyze image ---
+    ; Count pixel colors per scanline, find top 3 per line,
+    ; and accumulate global pixel counts across entire image.
     call analyze_image
+
+    ; --- Find 2 most common global colors across entire image ---
+    ; These become the fixed colors in entries 4 and 6.
+    call find_global_colors
+
+    ; --- Build per-scanline hero color stream ---
+    ; For each line, pick the best color that isn't a global.
+    ; Store its V6355D format in palette_stream (2 bytes/line).
+    call build_palette_stream
+
+    ; --- Pass 1 done, notify user ---
+    mov dx, msg_phase2
+    mov ah, 0x09
+    int 0x21
 
     ; --- Set CGA mode 4 (320x200x4, clears screen) ---
     mov ax, 0x0004
@@ -239,11 +282,20 @@ main:
     mov ah, 0x3E                ; DOS Close File
     int 0x21
 
+    ; --- Program global palette entries (4,6) before enabling video ---
+    call program_display_palette
+
+    ; --- Set palette 0 permanently (no flip) + bg/border = entry 0 ---
+    mov al, PAL_EVEN
+    out PORT_COLOR, al
+
     ; --- Enable video ---
     mov al, CGA_MODE4_ON
     out PORT_MODE, al
 
-    ; --- Display loop with per-scanline palette flip ---
+    ; --- Display loop ---
+    ; Each frame: wait for VBLANK, then update entry 2 per scanline
+    ; during HBLANK (8 OUTs per line, well within timing budget).
     mov byte [hsync_enabled], 1
     mov byte [vsync_enabled], 1
 
@@ -353,7 +405,7 @@ convert_bmp_palette:
 
 ; ============================================================================
 ; analyze_image - Pass 1: Read all BMP rows, determine top 3 colors per
-;                 scanline, build palette_stream
+;                 scanline, accumulate global pixel counts
 ; ============================================================================
 ; BMP is bottom-up: first row read from file = screen row 199.
 ; ============================================================================
@@ -365,6 +417,14 @@ analyze_image:
     push si
     push di
 
+    ; --- Clear global pixel counts before analysis ---
+    mov di, global_pixel_count
+    mov cx, 16
+.clr_global:
+    mov word [di], 0
+    add di, 2
+    loop .clr_global
+
     mov word [current_row], 199
 
 .analyze_loop:
@@ -374,6 +434,24 @@ analyze_image:
     jb .analyze_done
 
     call analyze_scanline       ; Process row_buffer for [current_row]
+
+    ; --- Diagnostic: print '.' every 50 rows to show progress ---
+    push ax
+    push bx
+    push dx
+    mov ax, [current_row]
+    xor dx, dx
+    mov bx, 50
+    div bx                      ; AX = row/50, DX = row mod 50
+    or dx, dx
+    jnz .no_dot
+    mov dl, '.'
+    mov ah, 0x02
+    int 0x21
+.no_dot:
+    pop dx
+    pop bx
+    pop ax
 
     mov ax, [current_row]
     or ax, ax
@@ -391,9 +469,9 @@ analyze_image:
     ret
 
 ; ============================================================================
-; analyze_scanline - Count colors, find top 3, build palette stream entry
+; analyze_scanline - Count colors, find top 3 for this scanline
 ; Input: [current_row], row_buffer filled with BMP pixel data
-; Output: scanline_top3 and palette_stream updated for this row
+; Output: scanline_top3 updated, global_pixel_count accumulated
 ; ============================================================================
 analyze_scanline:
     push ax
@@ -441,6 +519,17 @@ analyze_scanline:
     ; --- Exclude index 0 (always background/black) ---
     mov word [color_count], 0
 
+    ; --- Accumulate into global pixel counts (for finding global colors) ---
+    mov si, color_count
+    mov di, global_pixel_count
+    mov cx, 16
+.accum_global:
+    mov ax, [si]
+    add [di], ax
+    add si, 2
+    add di, 2
+    loop .accum_global
+
     ; --- Find top 3 most frequent colors ---
     call find_max_color         ; Returns AL = best index
     mov [top3_temp], al
@@ -472,40 +561,152 @@ analyze_scanline:
     mov al, [top3_temp + 2]
     mov [scanline_top3 + bx + 2], al
 
-    ; --- Build palette stream entry (16 bytes) ---
-    mov bx, [current_row]
-    shl bx, 4                  ; BX = row * 16
-    lea di, [palette_stream + bx]
+    ; (palette_stream is built later by build_palette_stream)
 
-    ; Entries 0-1: always black (bg/border + unused)
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+
+; ============================================================================
+; find_global_colors - Find 2 most common non-black colors across entire image
+; Called after analyze_image. Uses global_pixel_count[] accumulated during
+; per-scanline analysis.
+; Output: global_color_a, global_color_b = BMP palette indices
+; ============================================================================
+find_global_colors:
+    push ax
+    push bx
+    push cx
+    push dx
+
+    ; --- Find most common color (excluding black = index 0) ---
+    xor ax, ax                  ; Best index = 0
+    xor dx, dx                  ; Best count = 0
+    mov bx, 2                   ; Start at index 1 (word offset 2)
+    mov cx, 15
+.fgc_loop1:
+    cmp [global_pixel_count + bx], dx
+    jbe .fgc_not1
+    mov dx, [global_pixel_count + bx]
+    mov ax, bx
+    shr ax, 1                  ; Convert word offset to index
+.fgc_not1:
+    add bx, 2
+    loop .fgc_loop1
+
+    mov [global_color_a], al
+
+    ; Zero out winner's count for second search
+    mov bx, ax
+    shl bx, 1
+    mov word [global_pixel_count + bx], 0
+
+    ; --- Find second most common color ---
     xor ax, ax
-    mov [di], ax                ; Entry 0: 0x00, 0x00
-    mov [di + 2], ax            ; Entry 1: 0x00, 0x00
+    xor dx, dx
+    mov bx, 2
+    mov cx, 15
+.fgc_loop2:
+    cmp [global_pixel_count + bx], dx
+    jbe .fgc_not2
+    mov dx, [global_pixel_count + bx]
+    mov ax, bx
+    shr ax, 1
+.fgc_not2:
+    add bx, 2
+    loop .fgc_loop2
 
-    ; Entries 2-3: V6355D color for pixel value 1
-    ; (same color on both even and odd palette sets)
+    mov [global_color_b], al
+
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+
+; ============================================================================
+; build_palette_stream - Build per-scanline entry 2 color data
+; Called after find_global_colors. Uses scanline_top3[] data.
+;
+; For each scanline, picks a "hero" color from the line's top 3 that
+; is NOT global_color_a or global_color_b. Stores the V6355D 2-byte
+; color for entry 2 into palette_stream (2 bytes per line = 400 bytes).
+;
+; Also stores the hero color's BMP palette index in scanline_hero[]
+; for use by build_remap_table during Pass 2.
+; ============================================================================
+build_palette_stream:
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+
+    xor cx, cx                  ; CX = current row (0-199)
+
+.bps_loop:
+    ; --- Get this row's top3 palette indices ---
+    mov bx, cx
+    mov ax, bx
+    shl ax, 1
+    add bx, ax                  ; BX = row * 3
+
+    ; --- Find hero color: first top3 entry that isn't a global ---
+    ; Try top3[0]
+    mov al, [scanline_top3 + bx]
+    cmp al, [global_color_a]
+    je .bps_try2
+    cmp al, [global_color_b]
+    je .bps_try2
+    or al, al
+    jnz .bps_got_hero           ; Not black, not global → use it
+
+.bps_try2:
+    mov al, [scanline_top3 + bx + 1]
+    cmp al, [global_color_a]
+    je .bps_try3
+    cmp al, [global_color_b]
+    je .bps_try3
+    or al, al
+    jnz .bps_got_hero
+
+.bps_try3:
+    mov al, [scanline_top3 + bx + 2]
+    cmp al, [global_color_a]
+    je .bps_use_fallback
+    cmp al, [global_color_b]
+    je .bps_use_fallback
+    or al, al
+    jnz .bps_got_hero
+
+.bps_use_fallback:
+    ; All top3 are globals or black — use global_color_a as hero
+    ; (will map to same as CGA value 2, harmless)
+    mov al, [global_color_a]
+
+.bps_got_hero:
+    ; AL = hero BMP palette index for this row
+    mov bx, cx
+    mov [scanline_hero + bx], al
+
+    ; --- Store V6355D color for entry 2 ---
     xor bx, bx
-    mov bl, [top3_temp]
+    mov bl, al
     shl bx, 1                  ; Index into v6355_pal
     mov ax, [v6355_pal + bx]
-    mov [di + 4], ax            ; Entry 2 (even lines, px value 1)
-    mov [di + 6], ax            ; Entry 3 (odd lines, px value 1)
 
-    ; Entries 4-5: V6355D color for pixel value 2
-    xor bx, bx
-    mov bl, [top3_temp + 1]
-    shl bx, 1
-    mov ax, [v6355_pal + bx]
-    mov [di + 8], ax            ; Entry 4
-    mov [di + 10], ax           ; Entry 5
+    mov bx, cx
+    shl bx, 1                  ; BX = row * 2
+    mov [palette_stream + bx], ax
 
-    ; Entries 6-7: V6355D color for pixel value 3
-    xor bx, bx
-    mov bl, [top3_temp + 2]
-    shl bx, 1
-    mov ax, [v6355_pal + bx]
-    mov [di + 12], ax           ; Entry 6
-    mov [di + 14], ax           ; Entry 7
+    inc cx
+    cmp cx, 200
+    jb .bps_loop
 
     pop di
     pop si
@@ -659,12 +860,18 @@ render_to_vram:
 ; ============================================================================
 ; build_remap_table - Create 16-entry lookup: BMP index → CGA value (0-3)
 ; ============================================================================
-; For each of the 16 BMP palette indices:
-;   Index 0         → CGA 0 (always black)
-;   Index == top3[0] → CGA 1
-;   Index == top3[1] → CGA 2
-;   Index == top3[2] → CGA 3
-;   Otherwise        → nearest of {black, top3[0..2]} by RGB distance
+; CGA value mapping:
+;   0 = black (pixel value 0 → entry 0)
+;   1 = per-scanline hero color (pixel value 1 → entry 2, updated per line)
+;   2 = global color A (pixel value 2 → entry 4, fixed)
+;   3 = global color B (pixel value 3 → entry 6, fixed)
+;
+; For each BMP palette index:
+;   Index 0              → CGA 0 (black)
+;   Index == hero        → CGA 1
+;   Index == global_a    → CGA 2
+;   Index == global_b    → CGA 3
+;   Otherwise            → nearest of {black, hero, global_a, global_b}
 ; ============================================================================
 build_remap_table:
     push ax
@@ -673,33 +880,29 @@ build_remap_table:
     push dx
     push si
 
-    ; Load this scanline's top 3 chosen BMP palette indices
+    ; Load this scanline's color assignments
     mov bx, [current_row]
-    mov ax, bx
-    shl ax, 1
-    add bx, ax                  ; BX = row * 3
-
-    mov al, [scanline_top3 + bx]
-    mov [top3_temp], al
-    mov al, [scanline_top3 + bx + 1]
-    mov [top3_temp + 1], al
-    mov al, [scanline_top3 + bx + 2]
-    mov [top3_temp + 2], al
+    mov al, [scanline_hero + bx]
+    mov [top3_temp], al             ; top3_temp[0] = hero
+    mov al, [global_color_a]
+    mov [top3_temp + 1], al         ; top3_temp[1] = global A
+    mov al, [global_color_b]
+    mov [top3_temp + 2], al         ; top3_temp[2] = global B
 
     ; Map each BMP index 0-15 to CGA value 0-3
     xor cx, cx                  ; CL = current palette index
 
 .brt_loop:
-    ; Index 0 → always black (check FIRST to avoid false match with top3)
+    ; Index 0 → always black
     or cl, cl
     jz .brt_black
 
     ; Direct match with chosen colors?
-    cmp cl, [top3_temp]
+    cmp cl, [top3_temp]         ; Hero color?
     je .brt_1
-    cmp cl, [top3_temp + 1]
+    cmp cl, [top3_temp + 1]     ; Global A?
     je .brt_2
-    cmp cl, [top3_temp + 2]
+    cmp cl, [top3_temp + 2]     ; Global B?
     je .brt_3
 
     ; No direct match: find nearest by RGB distance
@@ -736,7 +939,8 @@ build_remap_table:
 ; find_nearest - Map a BMP palette index to the nearest available CGA value
 ; ============================================================================
 ; Uses RGB888 Manhattan distance: |dR| + |dG| + |dB|
-; Compares against: black (0,0,0), top3[0], top3[1], top3[2]
+; Compares against: black (0,0,0), hero, global_a, global_b
+; (stored in top3_temp[0..2] by build_remap_table)
 ; Skips top3 entries that are 0 (empty slot = fewer than 3 colors)
 ;
 ; Input:  CL = BMP palette index to remap
@@ -869,29 +1073,40 @@ read_bmp_row:
     ret
 
 ; ============================================================================
-; render_frame - Per-scanline palette flip + palette data stream
+; render_frame - Per-scanline HBLANK palette update (cgaflip3 approach)
 ; ============================================================================
-; Adapted from cgaflip4.asm. Runs every frame:
-;   - Wait for HSYNC edge (if enabled)
-;   - Flip CGA palette set via port 0xD9 (1 OUT during HBLANK)
-;   - Stream all 8 palette entries (16 bytes via LODSB/OUT to 0xDE)
-;     during the visible area (~160 cycles, within 424-cycle budget)
+; Adapted from cgaflip3.asm (proven flicker-free on real hardware).
 ;
-; Data source: palette_stream[200 lines × 16 bytes/line = 3200 bytes]
+; No palette flip — always palette 0. Per scanline during HBLANK:
+;   1. Open palette at entry 0 (OUT 0xDD = 0x40)
+;   2. Stream 4 zero bytes for entries 0-1 (black, unused)
+;   3. Stream 2 bytes for entry 2 from palette_stream (per-scanline color)
+;   4. Close palette (OUT 0xDD = 0x80)
+;
+; Total: 8 OUTs per scanline. At ~12 cycles each ≈ 99 cycles.
+; HBLANK is only ~80 cycles, so the last 2-3 OUTs (entry 2 data +
+; close) spill ~19 cycles into the visible area. This causes brief
+; left-edge flicker for leftmost ~20 pixels that reference entry 2.
+;
+; NOTE: REP OUTSB was tested and causes WORSE flickering — the V6355D
+; needs inter-byte gaps (instruction overhead) to latch palette data.
+;
+; Entries 4,6 (global colors) are set once via program_display_palette.
+;
+; Data source: palette_stream[200 lines × 2 bytes/line = 400 bytes]
 ; ============================================================================
 render_frame:
     cli
+    cld                         ; Ensure LODSB increments SI
 
     mov si, palette_stream
     mov cx, SCREEN_HEIGHT
-    mov bl, PAL_EVEN
-    mov bh, PAL_ODD
 
     cmp byte [hsync_enabled], 0
     je .rf_no_hsync
 
     ; ------------------------------------------------------------------
-    ; HSYNC-synchronized loop
+    ; HSYNC-synchronized loop (matches cgaflip3.asm structure)
     ; ------------------------------------------------------------------
 .rf_scanline:
 .rf_wait_low:
@@ -904,24 +1119,23 @@ render_frame:
     test al, 0x01
     jz .rf_wait_high
 
-    ; === HBLANK: flip palette (1 OUT) ===
-    mov al, bl
-    out PORT_COLOR, al
-
-    ; === VISIBLE AREA: stream all 8 palette entries (16 bytes) ===
+    ; === HBLANK: stream entries 0-2 (6 data bytes) ===
     mov al, 0x40
     out PORT_REG_ADDR, al       ; Open palette at entry 0
 
-    %rep 16
+    xor al, al
+    out PORT_REG_DATA, al       ; Entry 0 R = 0 (black)
+    out PORT_REG_DATA, al       ; Entry 0 G|B = 0
+    out PORT_REG_DATA, al       ; Entry 1 R = 0 (unused)
+    out PORT_REG_DATA, al       ; Entry 1 G|B = 0
+
     lodsb
-    out PORT_REG_DATA, al
-    %endrep
+    out PORT_REG_DATA, al       ; Entry 2 R (per-scanline color)
+    lodsb
+    out PORT_REG_DATA, al       ; Entry 2 G|B
 
     mov al, 0x80
     out PORT_REG_ADDR, al       ; Close palette
-
-    ; Swap even/odd for next scanline
-    xchg bl, bh
 
     loop .rf_scanline
     jmp .rf_done
@@ -931,29 +1145,116 @@ render_frame:
     ; ------------------------------------------------------------------
 .rf_no_hsync:
 .rf_nosync_line:
-    mov al, bl
-    out PORT_COLOR, al
-
     mov al, 0x40
     out PORT_REG_ADDR, al
 
-    %rep 16
+    xor al, al
+    out PORT_REG_DATA, al
+    out PORT_REG_DATA, al
+    out PORT_REG_DATA, al
+    out PORT_REG_DATA, al
+
     lodsb
     out PORT_REG_DATA, al
-    %endrep
+    lodsb
+    out PORT_REG_DATA, al
 
     mov al, 0x80
     out PORT_REG_ADDR, al
 
-    xchg bl, bh
     loop .rf_nosync_line
 
 .rf_done:
-    ; Reset to palette 0
-    mov al, PAL_EVEN
-    out PORT_COLOR, al
+    sti
+    ret
+
+; ============================================================================
+; program_display_palette - Set V6355D entries for display
+; ============================================================================
+; Called once before the display loop. Sets:
+;   Entry 0 = black (bg/border)
+;   Entry 1 = black (unused)
+;   Entry 2 = black (will be overwritten per-scanline by render_frame)
+;   Entry 3 = black (not used — no palette flip)
+;   Entry 4 = global color A (pixel value 2)
+;   Entry 5 = black (not used — no palette flip)
+;   Entry 6 = global color B (pixel value 3)
+;   Entry 7 = black (not used — no palette flip)
+; ============================================================================
+program_display_palette:
+    push ax
+    push bx
+    push si
+
+    cli
+
+    mov al, 0x40
+    out PORT_REG_ADDR, al       ; Open palette at entry 0
+    jmp short $+2
+
+    ; Entries 0-3: all black (6 bytes + entry 2 placeholder + entry 3)
+    xor al, al
+    out PORT_REG_DATA, al       ; E0 R
+    jmp short $+2
+    out PORT_REG_DATA, al       ; E0 GB
+    jmp short $+2
+    out PORT_REG_DATA, al       ; E1 R
+    jmp short $+2
+    out PORT_REG_DATA, al       ; E1 GB
+    jmp short $+2
+    out PORT_REG_DATA, al       ; E2 R (placeholder)
+    jmp short $+2
+    out PORT_REG_DATA, al       ; E2 GB (placeholder)
+    jmp short $+2
+    out PORT_REG_DATA, al       ; E3 R (unused)
+    jmp short $+2
+    out PORT_REG_DATA, al       ; E3 GB (unused)
+    jmp short $+2
+
+    ; Entry 4 = global color A
+    xor bx, bx
+    mov bl, [global_color_a]
+    shl bx, 1
+    mov al, [v6355_pal + bx]
+    out PORT_REG_DATA, al       ; E4 R
+    jmp short $+2
+    mov al, [v6355_pal + bx + 1]
+    out PORT_REG_DATA, al       ; E4 GB
+    jmp short $+2
+
+    ; Entry 5 = black (unused)
+    xor al, al
+    out PORT_REG_DATA, al       ; E5 R
+    jmp short $+2
+    out PORT_REG_DATA, al       ; E5 GB
+    jmp short $+2
+
+    ; Entry 6 = global color B
+    xor bx, bx
+    mov bl, [global_color_b]
+    shl bx, 1
+    mov al, [v6355_pal + bx]
+    out PORT_REG_DATA, al       ; E6 R
+    jmp short $+2
+    mov al, [v6355_pal + bx + 1]
+    out PORT_REG_DATA, al       ; E6 GB
+    jmp short $+2
+
+    ; Entry 7 = black (unused)
+    xor al, al
+    out PORT_REG_DATA, al       ; E7 R
+    jmp short $+2
+    out PORT_REG_DATA, al       ; E7 GB
+    jmp short $+2
+
+    mov al, 0x80
+    out PORT_REG_ADDR, al       ; Close palette
 
     sti
+
+    pop si
+    pop bx
+    pop ax
     ret
 
 ; ============================================================================
@@ -1050,17 +1351,18 @@ set_cga_palette:
 ; DATA - Messages
 ; ============================================================================
 
-msg_info    db 'PC1-BMP2 v1.0 - BMP Viewer with CGA Palette Flip', 0x0D, 0x0A
+msg_info    db 'PC1-BMP2 v2.0 - BMP Viewer with HBLANK Palette Update', 0x0D, 0x0A
             db 0x0D, 0x0A
-            db 'Displays 320x200 4-bit BMP images using per-scanline', 0x0D, 0x0A
-            db 'palette reprogramming (3 colors + black per line).', 0x0D, 0x0A
+            db 'Displays 320x200 4-bit BMP images using HBLANK', 0x0D, 0x0A
+            db 'palette reprogramming (cgaflip3 technique).', 0x0D, 0x0A
             db 0x0D, 0x0A
             db 'Usage: PC1-BMP2 filename.bmp', 0x0D, 0x0A
             db '       ESC=exit, H=toggle HSYNC, V=toggle VSYNC', 0x0D, 0x0A
             db 0x0D, 0x0A
             db 'By RetroErik - 2026', 0x0D, 0x0A, '$'
 
-msg_loading  db 'Analyzing image, please wait...', 0x0D, 0x0A, '$'
+msg_phase1   db 'Pass 1: Analyzing...', 0x0D, 0x0A, '$'
+msg_phase2   db 'Pass 2: Rendering...', 0x0D, 0x0A, '$'
 msg_file_err db 'Error: Cannot open file', 0x0D, 0x0A, '$'
 msg_not_bmp  db 'Error: Not a valid BMP file', 0x0D, 0x0A, '$'
 msg_format   db 'Error: BMP must be 4-bit uncompressed', 0x0D, 0x0A, '$'
@@ -1109,12 +1411,20 @@ pal_b:          times 16 db 0   ; Blue channel 0-255
 v6355_pal:      times 32 db 0
 
 ; Per-scanline analysis workspace
-top3_temp:      times 3 db 0    ; Temp: top 3 indices for current scanline
+top3_temp:      times 3 db 0    ; Temp: color indices for build_remap_table
 nn_best_dist:   dw 0            ; Temp: nearest-neighbor best distance
 nn_best_cga:    db 0            ; Temp: nearest-neighbor best CGA value
 
+; Global image analysis
+global_pixel_count: times 32 db 0  ; 16 words: total pixel counts per color
+global_color_a: db 0               ; BMP index of most common global color
+global_color_b: db 0               ; BMP index of 2nd most common global color
+
 ; Per-scanline chosen colors (200 rows × 3 indices = 600 bytes)
 scanline_top3:  times 600 db 0
+
+; Per-scanline hero color index (200 bytes)
+scanline_hero:  times 200 db 0
 
 ; Color frequency workspace (16 words = 32 bytes)
 color_count:    times 32 db 0
@@ -1124,19 +1434,13 @@ remap_table:    times 16 db 0
 
 ; ============================================================================
 ; Palette stream for render loop
-; 200 lines × 16 bytes per line = 3200 bytes
+; 200 lines × 2 bytes per line = 400 bytes
 ; ============================================================================
-; Each line: 8 palette entries × 2 bytes each
-;   [0,1]   Entry 0: always black (bg/border)
-;   [2,3]   Entry 1: always black (unused by any pixel value)
-;   [4,5]   Entry 2: scanline color 1 (even lines, pixel value 1)
-;   [6,7]   Entry 3: scanline color 1 (odd lines, pixel value 1)
-;   [8,9]   Entry 4: scanline color 2 (even lines, pixel value 2)
-;   [10,11] Entry 5: scanline color 2 (odd lines, pixel value 2)
-;   [12,13] Entry 6: scanline color 3 (even lines, pixel value 3)
-;   [14,15] Entry 7: scanline color 3 (odd lines, pixel value 3)
+; Each line: entry 2 R byte, entry 2 G|B byte (per-scanline hero color)
+; Entries 0-1 are always black (hardcoded in render_frame).
+; Entries 4,6 are global colors (set once by program_display_palette).
 ; ============================================================================
-palette_stream: times 3200 db 0
+palette_stream: times 400 db 0
 
 ; File I/O buffers
 bmp_header:     times 128 db 0  ; BMP file header + info header + palette
