@@ -64,6 +64,7 @@ Earlier development versions are preserved in the `Old Versions/` folder with de
 - **v3.0 Hero OUTSB** — Optimized hero, 0x44+OUTSB (~48 cycles, zero flicker)
 - **v5.0 Hero Error-Min** — Error-minimization hero selection
 - **v6.0 Hero 3-Method** — All three hero strategies, switchable live
+- **v6.0 E0 Reprogramming** — Experimental: per-scanline E0 rewrite for 4th color. Proved working but minimal gain — black occupies one of the 4 slots on most scanlines. Border artifacts on non-black lines.
 
 ## Technique Comparison
 
