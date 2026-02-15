@@ -21,93 +21,75 @@ The baseline viewer. Displays 4-bit BMP images using the PC1's hidden 160×200×
 PC1-BMP filename.bmp
 ```
 
-### PC1-BMP2 — Hero Technique (Original)
+### PC1-BMP2 — Simone Technique: Flip-First ⭐ (Best Quality)
 
-Uses CGA 320×200×4 mode with per-scanline V6355D palette reprogramming ("Hero technique"). Two global colors are fixed across the entire image; a third "hero" color changes every scanline during HBLANK.
+**The recommended image viewer.** Uses the Simone technique with the critical "flip-first" optimization: the palette flip is the very first instruction after HBLANK detection, exactly as Simone prescribes ("calibrated at nanosecond"). All subsequent palette writes target only INACTIVE entries, pre-loading for the next same-parity line (N+2).
 
-- 2 global colors (most frequent across image) + 1 per-scanline hero + black
-- 8 individual OUTs per scanline (~99 cycles, spills ~19 cycles past HBLANK)
-- **Known issue**: left-edge flicker from HBLANK spillover
+This eliminates virtually all flicker — the only remaining artifact is on the first scanline at the top of the screen. Combined with stability-based color reordering and skip optimization, this achieves 3 independent colors per scanline with near-zero flicker.
+
+- **3 independent colors per scanline** — best color fidelity
+- **Flip-first**: palette switch before palette write = near-zero flicker
+- **N+2 pre-loading**: inactive entries loaded for next same-parity line
+- Stability reorder: most stable color → highest entry (maximizes skips)
+- Skip optimization: lines where top3[N+2] == top3[N] get zero writes
 - Controls: ESC=exit, H=toggle HSYNC, V=toggle VSYNC
 
 ```
 PC1-BMP2 filename.bmp
 ```
 
-### PC1-BMP3 — Simone Technique + OUTSB
+### PC1-BMP3 — Simone Technique + Dithering
 
-Named after Simone, who first demonstrated palette-flip reprogramming in his Monkey Island conversion on the Olivetti PC1. Uses CGA palette flip (port 0xD9 bit 5) to alternate between two palettes each scanline. The inactive palette's entries are pre-loaded with the next line's colors via OUTSB streaming from register 0x44.
+Same flip-first Simone engine as PC1-BMP2, with four switchable dithering modes for enhanced color approximation. Dithering is applied at render time — no BMP modification needed.
 
-- 3 independent colors per scanline (no global colors needed)
-- OUTSB streaming (12 bytes E2–E7, ~198 cycles, starts at 0x44)
-- **Known artifact**: visible-area palette writes cause blinking
-- Controls: ESC=exit, H=toggle HSYNC, V=toggle VSYNC
+- **Mode 1 — None**: Direct XLAT nearest-color mapping (same as BMP2)
+- **Mode 2 — Bayer 4×4**: Ordered dithering with spread=32 (±16 threshold range)
+- **Mode 3 — 1D Error Diffusion**: Horizontal-only scanline error diffusion (err/2 right)
+- **Mode 4 — Sierra 2×2 Stipple** ⭐: Precomputed color-pair checkerboard — best results
+- Controls: ESC=exit, 1/2/3/4=dithering mode, H=toggle HSYNC, V=toggle VSYNC
 
 ```
 PC1-BMP3 filename.bmp
 ```
 
-### PC1-BMP4 — Simone Technique + Adaptive Streaming
+### Old Versions
 
-Same Simone technique as BMP3, plus stability-based color reordering and skip optimization. Colors are sorted so the most globally stable color occupies the highest palette entry. Lines where all entries match the previous line are skipped entirely (zero palette writes = zero blinking on those lines).
+Earlier development versions are preserved in the `Old Versions/` folder with descriptive names documenting the evolution of techniques:
 
-- Stability reorder: most stable color → slot C (entries 6/7)
-- Binary skip: stream_len = 0 (skip) or 12 (full write)
-- Can eliminate blinking on 30–50% of scanlines for stable images
-- Controls: ESC=exit, H=toggle HSYNC, V=toggle VSYNC
+- **v1.0–v1.1** — Native hidden 160×200×16 mode
+- **v2.0 Hero HBLANK** — Per-scanline hero with 8 individual OUTs (~99 cycles, left-edge flicker)
+- **v2.0 Simone Flip** — First palette flip implementation (visible blinking)
+- **v2.0 Flip Hero** — Simone + Hero hybrid (zero flicker, fewer colors)
+- **v3.0 Simone Adaptive** — Pre-flip-first Simone technique
+- **v3.0 Hero OUTSB** — Optimized hero, 0x44+OUTSB (~48 cycles, zero flicker)
+- **v5.0 Hero Error-Min** — Error-minimization hero selection
+- **v6.0 Hero 3-Method** — All three hero strategies, switchable live
 
-```
-PC1-BMP4 filename.bmp
-```
+## Technique Comparison
 
-### PC1-BMP5 — Hero Technique + OUTSB/Skip (Best Single-Method)
+| Technique | Program | Colors/Line | Independent | Flicker | Notes |
+|-----------|---------|:-----------:|:-----------:|---------|-------|
+| Native 160×200×16 | BMP | 16 | 16 | None | No palette tricks, half resolution |
+| **Simone (flip-first)** | **BMP2** | **3+black** | **3** | **First line only** | **Best: flip-first + skip** |
+| **Simone + Dithering** | **BMP3** | **3+black** | **3** | **First line only** | **BMP2 + 4 dither modes** |
 
-Optimized Hero technique. Starting at register 0x44 + OUTSB reduces per-scanline palette update to ~48 cycles — fits entirely within the ~80 cycle HBLANK with zero spillover. Lines where the hero color doesn't change are skipped entirely.
+### Which viewer to use?
 
-- 0x44 start + 2×OUTSB + close = ~48 cycles (fits in HBLANK)
-- Skip-unchanged: zero palette writes on lines with same hero
-- **98% flicker-free** on real hardware
-- Controls: ESC=exit, H=toggle HSYNC, V=toggle VSYNC
+**PC1-BMP2** is the recommended viewer. It provides the best color fidelity (3 independent colors per scanline) with near-zero flicker. The only visible artifact is a minor glitch on the first scanline.
 
-```
-PC1-BMP5 filename.bmp
-```
+**PC1-BMP3** adds four dithering modes on top of the same engine. Use it when you want to experiment with dithering techniques — Sierra 2×2 stipple (mode 4) typically gives the best results.
 
-### PC1-BMP7 — Error-Minimization Hero
+## Key Innovation: Flip-First (Simone-Calibrated)
 
-Same optimized Hero technique as BMP5, but with error-minimization hero selection. Instead of picking the most frequent non-global color, scores each candidate by `pixel_count × (distance_to_nearest_global >> 2)` — prioritizing colors that would be badly approximated without the hero slot.
+The breakthrough that eliminated flicker from the Simone technique:
 
-- Reduces visible error on lines with many competing colors
-- Tends to wash out colors toward globals on some images
-- Controls: ESC=exit, H=toggle HSYNC, V=toggle VSYNC
+1. **Old approach**: Write all 12 bytes during visible area, then flip at next HBLANK. The V6355D write protocol disrupts active palette entries → visible blinking.
 
-```
-PC1-BMP7 filename.bmp
-```
+2. **Flip-first** (BMP2): Flip palette IMMEDIATELY at HBLANK start. Then write the now-INACTIVE entries with colors for line N+2 (next same-parity line). Active entries get harmless same-value passthrough during HBLANK.
 
-### PC1-BMP8 — 3-Method Switchable Hero (Latest)
+The flip must be the **very first instruction** after HBLANK detection. Everything after targets inactive entries that aren't being displayed.
 
-Combines all three hero selection strategies in one viewer, switchable live via keyboard. Uses smart global selection (Global B chosen by error-weighting, not just frequency). All three hero streams are pre-computed at load time.
-
-- **Method 1** (key 1): Frequency-based hero (BMP5-style)
-- **Method 2** (key 2): Individual-need hero (BMP7-style)
-- **Method 3** (key 3): Total-error minimization (default)
-- Live switching: re-renders VRAM from BMP file on method change
-- Controls: ESC=exit, 1/2/3=method, H=toggle HSYNC, V=toggle VSYNC
-
-```
-PC1-BMP8 filename.bmp
-```
-
-## Techniques Overview
-
-| Technique | Programs | Colors/Line | Flicker | Notes |
-|-----------|----------|-------------|---------|-------|
-| Native 160×200×16 | BMP | 16 | None | No palette tricks |
-| Hero (original) | BMP2 | 3+black | Left edge | 8 OUTs spill past HBLANK |
-| Hero (optimized) | BMP5, BMP7, BMP8 | 3+black | ~None | 0x44+OUTSB fits in HBLANK |
-| Simone (OUTSB) | BMP3 | 3+black | Moderate | Palette flip, visible-area writes |
-| Simone (adaptive) | BMP4 | 3+black | Reduced | Skip-unchanged lines |
+**Why N+2?** After flipping on line N, the inactive entries won't display until line N+2 (next same-parity line). Line N+1 uses the other palette, whose entries were pre-loaded by the previous iteration.
 
 ## Building
 
@@ -117,17 +99,13 @@ All programs are NASM COM files targeting the NEC V40 (80186 compatible):
 nasm -f bin -o PC1-BMP.com PC1-BMP.asm
 nasm -f bin -o PC1-BMP2.com PC1-BMP2.asm
 nasm -f bin -o PC1-BMP3.com PC1-BMP3.asm
-nasm -f bin -o PC1-BMP4.com PC1-BMP4.asm
-nasm -f bin -o PC1-BMP5.com PC1-BMP5.asm
-nasm -f bin -o PC1-BMP7.com PC1-BMP7.asm
-nasm -f bin -o PC1-BMP8.com PC1-BMP8.asm
 ```
 
 ## Supported BMP Format
 
 - **Color Depth**: 4-bit (16 colors)
 - **Compression**: Uncompressed (BI_RGB)
-- **Resolution**: 320×200 (BMP2–BMP8) or 160×200 / 320×200 (BMP)
+- **Resolution**: 320×200 (BMP2–BMP3) or 160×200 / 320×200 (BMP)
 
 ## Requirements
 
@@ -161,7 +139,22 @@ Key constraints discovered during development:
 At 8 MHz, HBLANK provides ~80 cycles:
 - Hero optimized (0x44+OUTSB): ~48 cycles → fits with margin
 - Hero original (0x40+8 OUTs): ~99 cycles → ~19 cycle spillover
-- Simone (0x44+12×OUTSB): ~198 cycles → ~109 cycle spillover (accepted)
+- Simone flip-first (0x44+12×OUTSB): ~198 cycles → ~118 spillover (targets inactive entries only — invisible)
+
+### Flip-First Timing Detail
+
+```
+HBLANK start ──┐
+               │ OUT PORT_COLOR  (flip palette — instant, ~8 cycles)
+               │ OUT 0x44        (open palette at E2)
+               │ 12× OUTSB      (E2-E7, ~168 cycles)
+               │ OUT 0x80        (close palette)
+               └── ~198 cycles total
+                   │
+                   ├── First ~80 cycles: during HBLANK (invisible)
+                   └── Remaining ~118: visible area, but writing
+                       INACTIVE entries only → no visible artifact
+```
 
 ## Author
 
