@@ -47,7 +47,7 @@
 ;          the nanosecond-critical operation; everything else follows.
 ;
 ;     2. Remaining HBLANK: stream entries E2-E7 via OUTSB
-;        (open at 0x44 + 12×OUTSB + close = ~198 cycles).
+;        (open at 0x44 + 12×OUTSB + close = ~132 cycles).
 ;        E0-E1 (always black) are skipped by starting at 0x44.
 ;        Now-ACTIVE entries get same-value passthrough rewrites
 ;        (harmless during HBLANK — not visible to the viewer).

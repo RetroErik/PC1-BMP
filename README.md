@@ -124,7 +124,7 @@ The Yamaha V6355D uses a sequential write protocol:
 - **Close**: write 0x80 to port 0xDD
 
 Key constraints discovered during development:
-- **OUTSB works**: ~14 cycles/byte with natural inter-byte gap for latching
+- **OUTSB works**: ~9 cycles/byte with natural inter-byte gap for latching
 - **OUTSW fails**: V6355D can't latch 2 bytes within one word I/O cycle
 - **REP OUTSB fails**: no inter-byte gap between repetitions — too fast
 - **0x44 start proven**: skip entries 0–1, begin writing at entry 2
@@ -140,20 +140,21 @@ Key constraints discovered during development:
 At 8 MHz, HBLANK provides ~80 cycles:
 - Hero optimized (0x44+OUTSB): ~48 cycles → fits with margin
 - Hero original (0x40+8 OUTs): ~99 cycles → ~19 cycle spillover
-- Simone flip-first (0x44+12×OUTSB): ~198 cycles → ~118 spillover (targets inactive entries only — invisible)
+- Simone flip-first (0x44+12×OUTSB): ~159 cycles → ~79 spillover (targets inactive entries only — invisible)
 
 ### Flip-First Timing Detail
 
 ```
 HBLANK start ──┐
-               │ OUT PORT_COLOR  (flip palette — instant, ~8 cycles)
-               │ OUT 0x44        (open palette at E2)
-               │ 12× OUTSB      (E2-E7, ~168 cycles)
-               │ OUT 0x80        (close palette)
-               └── ~198 cycles total
+               │ OUT PORT_COLOR  (flip palette — instant, ~11 cycles)
+               │ Loop overhead   (xchg/cmp/jne/inc — ~16 cycles)
+               │ OUT 0x44        (open palette at E2 — ~12 cycles)
+               │ 12× OUTSB      (E2-E7, ~108 cycles)
+               │ OUT 0x80        (close palette — ~12 cycles)
+               └── ~159 cycles total
                    │
                    ├── First ~80 cycles: during HBLANK (invisible)
-                   └── Remaining ~118: visible area, but writing
+                   └── Remaining ~79: visible area, but writing
                        INACTIVE entries only → no visible artifact
 ```
 
