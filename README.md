@@ -21,9 +21,9 @@ The baseline viewer. Displays 4-bit BMP images using the PC1's hidden 160×200×
 PC1-BMP filename.bmp
 ```
 
-### PC1-BMP2 — Simone Technique: Flip-First ⭐ (Best Quality)
+### PC1-BMP2 — Flip-First Technique
 
-**The recommended image viewer.** Uses the Simone technique with the critical "flip-first" optimization: the palette flip is the very first instruction after HBLANK detection, exactly as Simone prescribes ("calibrated at nanosecond"). All subsequent palette writes target only INACTIVE entries, pre-loading for the next same-parity line (N+2).
+Uses the flip-first optimization: the palette flip is the very first instruction after HBLANK detection, calibrated at nanosecond precision. All subsequent palette writes target only INACTIVE entries, pre-loading for the next same-parity line (N+2).
 
 This eliminates virtually all flicker — the only remaining artifact is on the first scanline at the top of the screen. Combined with stability-based color reordering and skip optimization, this achieves 3 independent colors per scanline with near-zero flicker.
 
@@ -38,9 +38,9 @@ This eliminates virtually all flicker — the only remaining artifact is on the 
 PC1-BMP2 filename.bmp
 ```
 
-### PC1-BMP3 — Simone Technique + Dithering
+### PC1-BMP3 — Flip-First + Dithering
 
-Same flip-first Simone engine as PC1-BMP2, with four switchable dithering modes for enhanced color approximation. Dithering is applied at render time — no BMP modification needed.
+Same flip-first engine as PC1-BMP2, with four switchable dithering modes for enhanced color approximation. Dithering is applied at render time — no BMP modification needed.
 
 - **Mode 1 — None**: Direct XLAT nearest-color mapping (same as BMP2)
 - **Mode 2 — Bayer 4×4**: Ordered dithering with spread=32 (±16 threshold range)
@@ -50,6 +50,24 @@ Same flip-first Simone engine as PC1-BMP2, with four switchable dithering modes 
 
 ```
 PC1-BMP3 filename.bmp
+```
+
+### PC1-BMP4 — Flip-First with 512-Color Support ⭐ (Best Quality)
+
+**The recommended image viewer.** Evolution of PC1-BMP2 with support for **8-bit (256-color) BMPs**, unlocking the full V6355D 512-color space (3 bits per R/G/B channel = 8×8×8 = 512 colors). Also supports 4-bit BMPs for backward compatibility.
+
+With 8-bit palettes, images can draw from up to 256 unique colors across the full 512-color V6355D gamut. Each scanline still selects the 3 best + black, but using a much richer global palette dramatically improves image quality.
+
+- **4-bit and 8-bit BMP support** — up to 256 palette entries
+- **Full V6355D 512-color space** — RGB333 (8 levels per channel)
+- **Auto-detected background** — darkest palette entry used as background (index 0 need not be black)
+- Same flip-first engine, stability reorder, and skip optimization as BMP2
+- ANSI-colored splash screen with loading progress (border cycling)
+- Exit info screen: BMP format, bit depth, palette capacity, unique colors
+- Controls: ESC=exit (shows image info)
+
+```
+PC1-BMP4 filename.bmp
 ```
 
 ### Old Versions
@@ -71,18 +89,21 @@ Earlier development versions are preserved in the `Old Versions/` folder with de
 | Technique | Program | Colors/Line | Independent | Flicker | Notes |
 |-----------|---------|:-----------:|:-----------:|---------|-------|
 | Native 160×200×16 | BMP | 16 | 16 | None | No palette tricks, half resolution |
-| **Simone (flip-first)** | **BMP2** | **3+black** | **3** | **First line only** | **Best: flip-first + skip** |
-| **Simone + Dithering** | **BMP3** | **3+black** | **3** | **First line only** | **BMP2 + 4 dither modes** |
+| **Flip-first** | **BMP2** | **3+black** | **3** | **First line only** | Flip-first + skip, 4-bit BMPs |
+| **Flip-first + Dithering** | **BMP3** | **3+black** | **3** | **First line only** | BMP2 + 4 dither modes |
+| **Flip-first (512-color)** | **BMP4** | **3+black** | **3** | **First line only** | **Best: 4-bit + 8-bit BMP, 512 colors** |
 
 ### Which viewer to use?
 
-**PC1-BMP2** is the recommended viewer. It provides the best color fidelity (3 independent colors per scanline) with near-zero flicker. The only visible artifact is a minor glitch on the first scanline.
+**PC1-BMP4** is the recommended viewer. It supports both 4-bit and 8-bit BMPs, accessing the V6355D's full 512-color space for the best image quality. Same flip-first engine with near-zero flicker.
 
-**PC1-BMP3** adds four dithering modes on top of the same engine. Use it when you want to experiment with dithering techniques — Sierra 2×2 stipple (mode 4) typically gives the best results.
+**PC1-BMP2** is the simpler alternative if you only have 4-bit (16-color) BMPs.
 
-## Key Innovation: Flip-First (Simone-Calibrated)
+**PC1-BMP3** adds four dithering modes on top of the BMP2 engine. Use it when you want to experiment with dithering techniques — Sierra 2×2 stipple (mode 4) typically gives the best results.
 
-The breakthrough that eliminated flicker from the Simone technique:
+## Key Innovation: Flip-First
+
+The breakthrough that eliminated flicker from the palette-flip technique:
 
 1. **Old approach**: Write all 12 bytes during visible area, then flip at next HBLANK. The V6355D write protocol disrupts active palette entries → visible blinking.
 
@@ -100,13 +121,15 @@ All programs are NASM COM files targeting the NEC V40 (80186 compatible):
 nasm -f bin -o PC1-BMP.com PC1-BMP.asm
 nasm -f bin -o PC1-BMP2.com PC1-BMP2.asm
 nasm -f bin -o PC1-BMP3.com PC1-BMP3.asm
+nasm -f bin -o PC1-BMP4.com PC1-BMP4.asm
 ```
 
 ## Supported BMP Format
 
-- **Color Depth**: 4-bit (16 colors)
+- **Color Depth**: 4-bit (16 colors) or 8-bit (256 colors, PC1-BMP4)
 - **Compression**: Uncompressed (BI_RGB)
-- **Resolution**: 320×200 (BMP2–BMP3) or 160×200 / 320×200 (BMP)
+- **Resolution**: 320×200 (BMP2–BMP4) or 160×200 / 320×200 (BMP)
+- **V6355D Color Space**: 512 colors (RGB333 — 3 bits per channel)
 
 ## Requirements
 
