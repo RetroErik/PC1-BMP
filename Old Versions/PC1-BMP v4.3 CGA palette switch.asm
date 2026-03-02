@@ -1,11 +1,6 @@
 ; ============================================================================
-; PC1-BMP4.ASM (v 4.4) - BMP Viewer: Flip-First with 512-Color Support
+; PC1-BMP4.ASM (v 4.3) - BMP Viewer: Flip-First Technique
 ; ============================================================================
-;
-; v4.4: Uses REP OUTSB for palette streaming — confirmed working on real
-;   PC1 hardware. REP OUTSB stays in V40 microcode (no instruction
-;   re-fetch per byte), saving ~33 cycles over 12 individual OUTSBs.
-;   The V6355D accepts palette bytes at full REP speed with no issues.
 ;
 ; Displays 320x200 4-bit or 8-bit BMP images on the Olivetti Prodest PC1
 ; using CGA 320x200x4 mode with per-scanline V6355D palette reprogramming.
@@ -30,7 +25,7 @@
 ; v4.3: C64-STYLE LOADING + EXIT INFO + BG AUTO-DETECT
 ;   - ANSI-colored splash screen with loading message.
 ;   - Border color cycling during Pass 1 and Pass 2, matching the
-;     classic Commodore 64 loading screen effect.
+;     classic Commodore 64 loading screen effect. White flash on done.
 ;   - On exit (ESC): displays image statistics in text mode —
 ;     BMP format, dimensions, bit depth, palette capacity, and
 ;     number of unique colors actually used in the image.
@@ -60,8 +55,8 @@
 ;          previous HBLANK into then-inactive entries. The flip is
 ;          the nanosecond-critical operation; everything else follows.
 ;
-;     2. Remaining HBLANK: stream entries E2-E7 via REP OUTSB
-;        (open at 0x44 + REP OUTSB(12) + close = fewer cycles).
+;     2. Remaining HBLANK: stream entries E2-E7 via OUTSB
+;        (open at 0x44 + 12×OUTSB + close = ~132 cycles).
 ;        E0-E1 (always black) are skipped by starting at 0x44.
 ;        Now-ACTIVE entries get same-value passthrough rewrites
 ;        (harmless during HBLANK — not visible to the viewer).
@@ -143,7 +138,7 @@
 ;      using nearest-color matching, pack into 2bpp CGA VRAM
 ;   6. Program initial palette: entries for lines 0 and 1
 ;   7. Enter display loop: VSYNC wait + per-scanline HSYNC-synced
-;      FLIP-FIRST + REP OUTSB entry 2-7 streaming to inactive entries
+;      FLIP-FIRST + OUTSB entry 2-7 streaming to inactive entries
 ;
 ; ============================================================================
 ; KNOWN ARTIFACT — FIRST SCANLINE
@@ -182,7 +177,7 @@
 ; BUILD
 ; ============================================================================
 ;
-;   nasm -f bin -o PC1-BMP4B.com PC1-BMP4B.asm
+;   nasm -f bin -o PC1-BMP4.com PC1-BMP4.asm
 ;
 ; ============================================================================
 ; USAGE
@@ -652,14 +647,14 @@ analyze_scanline:
     push di
 
     ; --- Clear color counts (256 words = 512 bytes) ---
-    push es
-    push ds
-    pop es                          ; ES = DS (safe for REP STOSW)
+    ; NOTE: Uses explicit DS:DI loop instead of REP STOSW (which needs ES:DI)
+    ; to avoid crash if ES was clobbered by DOS INT 21h
     mov di, color_count
     mov cx, 256
-    xor ax, ax
-    rep stosw
-    pop es
+.clr_counts:
+    mov word [di], 0
+    add di, 2
+    loop .clr_counts
 
     ; --- Count pixel colors (320 pixels) ---
     mov si, row_buffer
@@ -668,7 +663,6 @@ analyze_scanline:
 
     ; --- 4bpp: 2 pixels per byte (160 bytes = 320 pixels) ---
     mov cx, BMP_ROW_4BPP
-    xor bh, bh                  ; BH stays 0 throughout (nibbles 0-15)
 
 .count_loop_4:
     lodsb                       ; AL = [px_hi | px_lo]
@@ -676,27 +670,18 @@ analyze_scanline:
 
     ; High nibble = left pixel
     shr al, 4
+    xor bx, bx
     mov bl, al
-    add bx, bx                  ; Word index
+    shl bx, 1                  ; Word index
     inc word [color_count + bx]
-    shr bx, 1                   ; Restore byte index width
 
     ; Low nibble = right pixel
     mov al, ah
     and al, 0x0F
+    xor bx, bx
     mov bl, al
-    add bx, bx
+    shl bx, 1
     inc word [color_count + bx]
-    shr bx, 1
-
-    ; --- C64-style: change border every 16 bytes ---
-    test cl, 0x0F
-    jnz .no_border_cnt4
-    mov al, [border_ctr]
-    out PORT_COLOR, al
-    inc byte [border_ctr]
-    and byte [border_ctr], 0x0F
-.no_border_cnt4:
 
     loop .count_loop_4
     jmp .count_done
@@ -704,23 +689,13 @@ analyze_scanline:
     ; --- 8bpp: 1 pixel per byte (320 bytes = 320 pixels) ---
 .count_8bpp:
     mov cx, BMP_ROW_8BPP
-    xor bh, bh                  ; BH stays 0 (indices 0-255 fit in BL)
 
 .count_loop_8:
     lodsb                       ; AL = palette index (0-255)
+    xor bx, bx
     mov bl, al
-    add bx, bx                  ; Word index
+    shl bx, 1                  ; Word index
     inc word [color_count + bx]
-    shr bx, 1                   ; Restore byte index width
-
-    ; --- C64-style: change border every 16 bytes ---
-    test cl, 0x0F
-    jnz .no_border_cnt8
-    mov al, [border_ctr]
-    out PORT_COLOR, al
-    inc byte [border_ctr]
-    and byte [border_ctr], 0x0F
-.no_border_cnt8:
 
     loop .count_loop_8
 
@@ -795,8 +770,7 @@ find_max_color:
 
 .fmc_not_better:
     add bx, 2
-    dec cx
-    jnz .fmc_loop
+    loop .fmc_loop
 
     ; AL = best index (bg_index if none found)
     pop dx
@@ -829,14 +803,12 @@ reorder_by_stability:
     push di
 
     ; --- Clear line presence count (256 words) ---
-    push es
-    push ds
-    pop es                          ; ES = DS (safe for REP STOSW)
     mov di, color_line_count
     mov cx, 256
-    xor ax, ax
-    rep stosw
-    pop es
+.rbs_clr:
+    mov word [di], 0
+    add di, 2
+    loop .rbs_clr
 
     ; --- Count lines where each color index appears ---
     mov si, scanline_top3
@@ -1618,7 +1590,7 @@ read_bmp_row:
 ;   the NOW-INACTIVE entries (pre-loading for N+2, next same-parity).
 ;
 ;   For each scanline, checks stream_len[] (0 or 12):
-;     stream_len = 12: Full write (flip, then REP OUTSB(12) to inactive)
+;     stream_len = 12: Full write (flip, then 12×OUTSB to inactive)
 ;     stream_len = 0:  SKIP — flip only, no palette writes needed
 ;
 ;   Skip condition: scanline_top3[N+2] == scanline_top3[N]. The
@@ -1672,16 +1644,21 @@ render_frame:
     inc bp
 
     ; === Full write: open palette at entry 2, stream E2-E7 ===
-    ; REP OUTSB variant: single instruction replaces 12× individual OUTSB.
-    ; V40 keeps REP OUTSB in microcode — no instruction re-fetch overhead.
-    ; CX is saved/restored since it's the outer scanline loop counter.
     mov al, 0x44
     out PORT_REG_ADDR, al       ; Open palette at entry 2 (skip E0-E1)
 
-    push cx                     ; Save scanline counter
-    mov cx, 12                  ; 12 bytes: E2-E7, 2 bytes each (R, GB)
-    rep outsb                   ; Stream all palette data in one burst
-    pop cx                      ; Restore scanline counter
+    outsb                       ; E2 R
+    outsb                       ; E2 GB
+    outsb                       ; E3 R
+    outsb                       ; E3 GB
+    outsb                       ; E4 R
+    outsb                       ; E4 GB
+    outsb                       ; E5 R
+    outsb                       ; E5 GB
+    outsb                       ; E6 R
+    outsb                       ; E6 GB
+    outsb                       ; E7 R
+    outsb                       ; E7 GB
 
     mov al, 0x80
     out PORT_REG_ADDR, al       ; Close palette
