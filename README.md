@@ -4,8 +4,13 @@
 
 A collection of BMP image viewers for the Olivetti Prodest PC1, ranging from a simple native-mode viewer to advanced versions that use real-time V6355D palette reprogramming to display more colors than the hardware normally allows.
 
+By **Retro Erik** — [YouTube: Retro Hardware and Software](https://www.youtube.com/@RetroErik)
+
 ![Olivetti Prodest PC1](https://img.shields.io/badge/Platform-Olivetti%20Prodest%20PC1-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-green)
+
+### 📥 [Download pc1-bmp.com — simple 16-color BMP viewer](pc1-bmp.com)
+### 📥 [Download pc1-bmp4.com — CGA mode viewer with per-scanline palette flipping](pc1-bmp4.com)
 
 ## Programs
 
