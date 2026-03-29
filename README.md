@@ -191,3 +191,10 @@ Created using VS Code with GitHub Copilot
 ## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+---
+
+## YouTube
+
+For more retro computing content, visit my YouTube channel **Retro Hardware and Software**:
+[https://www.youtube.com/@RetroErik](https://www.youtube.com/@RetroErik)
