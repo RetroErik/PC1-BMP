@@ -21,6 +21,18 @@ The baseline viewer. Displays 4-bit BMP images using the PC1's hidden 160×200×
 PC1-BMP filename.bmp
 ```
 
+![PC1-BMP native viewer](pc1-bmp.png)
+
+![Loading screen](pc1-bmp-loading%20screen.jpg)
+
+*Example images displayed with the native 160×200×16 viewer:*
+
+![Ghost'n Goblins](Ghost'n%20Goblins%20.png)
+
+![Disintegration](Disintegration%20.png)
+
+![Larry](Larry.png)
+
 ### PC1-BMP2 — Flip-First Technique
 
 Uses the flip-first optimization: the palette flip is the very first instruction after HBLANK detection, calibrated at nanosecond precision. All subsequent palette writes target only INACTIVE entries, pre-loading for the next same-parity line (N+2).
@@ -38,6 +50,8 @@ This eliminates virtually all flicker — the only remaining artifact is on the 
 PC1-BMP2 filename.bmp
 ```
 
+![PC1-BMP2 flip-first](pc1-bmp2.jpg)
+
 ### PC1-BMP3 — Flip-First + Dithering
 
 Same flip-first engine as PC1-BMP2, with four switchable dithering modes for enhanced color approximation. Dithering is applied at render time — no BMP modification needed.
@@ -51,6 +65,8 @@ Same flip-first engine as PC1-BMP2, with four switchable dithering modes for enh
 ```
 PC1-BMP3 filename.bmp
 ```
+
+![PC1-BMP3 dithering](pc1-bmp3.jpg)
 
 ### PC1-BMP4 — Flip-First with 512-Color Support ⭐ (Best Quality)
 
@@ -69,6 +85,8 @@ With 8-bit palettes, images can draw from up to 256 unique colors across the ful
 ```
 PC1-BMP4 filename.bmp
 ```
+
+![PC1-BMP4 loading screen](PC1-BMP4-loading%20screen.png)
 
 ### Old Versions
 
