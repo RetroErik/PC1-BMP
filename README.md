@@ -26,17 +26,32 @@ The baseline viewer. Displays 4-bit BMP images using the PC1's hidden 160×200×
 PC1-BMP filename.bmp
 ```
 
-![PC1-BMP native viewer](pc1-bmp.png)
+<p>
+<em>PC1-BMP native viewer</em><br>
+<img src="pc1-bmp.png" width="60%" alt="PC1-BMP native viewer">
+</p>
 
-![Loading screen](pc1-bmp-loading%20screen.jpg)
+<p>
+<em>PC1-BMP loading screen</em><br>
+<img src="pc1-bmp-loading%20screen.jpg" width="60%" alt="PC1-BMP loading screen">
+</p>
 
 *Example images displayed with the native 160×200×16 viewer:*
 
-![Ghost'n Goblins](Ghost'n%20Goblins%20.png)
+<p>
+<em>Ghost'n Goblins</em><br>
+<img src="Ghost'n%20Goblins%20.png" width="60%" alt="Ghost'n Goblins">
+</p>
 
-![Disintegration](Disintegration%20.png)
+<p>
+<em>Disintegration</em><br>
+<img src="Disintegration%20.png" width="60%" alt="Disintegration">
+</p>
 
-![Larry](Larry.png)
+<p>
+<em>Larry</em><br>
+<img src="Larry.png" width="60%" alt="Larry">
+</p>
 
 ### PC1-BMP2 — Flip-First Technique
 
@@ -55,7 +70,10 @@ This eliminates virtually all flicker — the only remaining artifact is on the 
 PC1-BMP2 filename.bmp
 ```
 
-![PC1-BMP2 flip-first](pc1-bmp2.jpg)
+<p>
+<em>PC1-BMP2 flip-first</em><br>
+<img src="pc1-bmp2.jpg" width="60%" alt="PC1-BMP2 flip-first">
+</p>
 
 ### PC1-BMP3 — Flip-First + Dithering
 
@@ -71,7 +89,10 @@ Same flip-first engine as PC1-BMP2, with four switchable dithering modes for enh
 PC1-BMP3 filename.bmp
 ```
 
-![PC1-BMP3 dithering](pc1-bmp3.jpg)
+<p>
+<em>PC1-BMP3 dithering</em><br>
+<img src="pc1-bmp3.jpg" width="60%" alt="PC1-BMP3 dithering">
+</p>
 
 ### PC1-BMP4 — Flip-First with 512-Color Support ⭐ (Best Quality)
 
@@ -91,7 +112,10 @@ With 8-bit palettes, images can draw from up to 256 unique colors across the ful
 PC1-BMP4 filename.bmp
 ```
 
-![PC1-BMP4 loading screen](PC1-BMP4-loading%20screen.png)
+<p>
+<em>PC1-BMP4 loading screen</em><br>
+<img src="PC1-BMP4-loading%20screen.png" width="60%" alt="PC1-BMP4 loading screen">
+</p>
 
 ### Old Versions
 
