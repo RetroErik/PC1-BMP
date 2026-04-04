@@ -161,6 +161,16 @@ The flip must be the **very first instruction** after HBLANK detection. Everythi
 
 **Why N+2?** After flipping on line N, the inactive entries won't display until line N+2 (next same-parity line). Line N+1 uses the other palette, whose entries were pre-loaded by the previous iteration.
 
+<p>
+<em>PC1-BMP2: Flip-First with 12× individual OUTSB</em><br>
+<img src="pc1-bmp2-flip-first-streaming.svg" width="80%" alt="PC1-BMP2 flip-first streaming diagram — 12 individual OUTSB instructions">
+</p>
+
+<p>
+<em>PC1-BMP4: Flip-First with REP OUTSB — saves ~33 cycles/scanline</em><br>
+<img src="pc1-bmp4-flip-first-streaming.svg" width="80%" alt="PC1-BMP4 flip-first streaming diagram — REP OUTSB optimization">
+</p>
+
 ## Building
 
 All programs are NASM COM files targeting the NEC V40 (80186 compatible):
