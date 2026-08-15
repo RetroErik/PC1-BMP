@@ -2,11 +2,12 @@
 
 **BMP Image Viewer Suite for Olivetti Prodest PC1**
 
-A collection of BMP image viewers for the Olivetti Prodest PC1, ranging from a simple native-mode viewer to advanced versions that use real-time V6355D palette reprogramming to display more colors than the hardware normally allows.
+A collection of BMP image viewers for the Olivetti Prodest PC1 and ACV-1030, ranging from a simple native-mode viewer to advanced versions that use real-time V6355D palette reprogramming to display more colors than the hardware normally allows.
 
 By **Retro Erik** — [YouTube: Retro Hardware and Software](https://www.youtube.com/@RetroErik)
 
 ![Olivetti Prodest PC1](https://img.shields.io/badge/Platform-Olivetti%20Prodest%20PC1-blue)
+![Platform](https://img.shields.io/badge/Platform-ACV--1030-blue)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-green)
 
 ### 📥 [Download pc1-bmp.com — simple 16-color BMP viewer](pc1-bmp.com)
@@ -18,9 +19,6 @@ By **Retro Erik** — [YouTube: Retro Hardware and Software](https://www.youtube
 
 The baseline viewer. Displays 4-bit BMP images using the PC1's hidden 160×200×16 graphics mode. Supports 160×200 (native) and 320×200 (auto-downscaled) BMPs.
 
-- C64-style loading effects (border flashing, color cycling, completion flash)
-- PERITEL.COM compatible (preserves horizontal position)
-- Press any key to exit
 
 ```
 PC1-BMP filename.bmp
@@ -28,29 +26,69 @@ PC1-BMP filename.bmp
 
 <p>
 <em>PC1-BMP native viewer</em><br>
-<img src="pc1-bmp.png" width="60%" alt="PC1-BMP native viewer">
+<img src="Screenshots/pc1-bmp.png" width="60%" alt="PC1-BMP native viewer">
 </p>
 
 <p>
 <em>PC1-BMP loading screen</em><br>
-<img src="pc1-bmp-loading%20screen.jpg" width="60%" alt="PC1-BMP loading screen">
+<img src="Screenshots/pc1-bmp-loading%20screen.jpg" width="60%" alt="PC1-BMP loading screen">
 </p>
 
 *Example images displayed with the native 160×200×16 viewer:*
 
 <p>
 <em>Ghost'n Goblins</em><br>
-<img src="Ghost'n%20Goblins%20.png" width="60%" alt="Ghost'n Goblins">
+<img src="Screenshots/Ghost'n%20Goblins%20.png" width="60%" alt="Ghost'n Goblins">
 </p>
 
 <p>
 <em>Disintegration</em><br>
-<img src="Disintegration%20.png" width="60%" alt="Disintegration">
+<img src="Screenshots/Disintegration%20.png" width="60%" alt="Disintegration">
 </p>
 
 <p>
 <em>Larry</em><br>
-<img src="Larry.png" width="60%" alt="Larry">
+<img src="Screenshots/Larry.png" width="60%" alt="Larry">
+</p>
+
+### ACV-BMP — ACV-1030 286 Viewer
+
+ACV-BMP is the ACV-1030 port of the native viewer. It targets a 12 MHz Intel
+80286 with an ACV-1030 card and preserves the hidden 160×200×16 packed-nibble
+framebuffer format.
+
+Unlike the PC1 viewer, ACV-BMP uses the ACV-1030 full V6355D ports and the
+`B800h` color/graphics framebuffer window. Composite output can use the BMP's
+16 programmable palette entries from the V6355D RGB333 space. CGA/TTL output
+always uses the card's fixed 16-color IRGB palette.
+
+```text
+ACV-BMP filename.bmp
+ACV-BMP /CGA filename.bmp
+```
+
+The `/CGA` option remaps each BMP palette entry to the nearest fixed CGA/TTL
+color at runtime. It does not modify the BMP file and skips composite palette
+programming. The original `PC1-BMP.asm` remains the PC1 reference source.
+
+Build the ACV port from this folder:
+
+```cmd
+nasm -f bin -o bin\ACV-BMP.COM -l bin\ACV-BMP.lst ACV-BMP.asm
+```
+
+See [ACV-BMP-TEST-PLAN.md](ACV-BMP-TEST-PLAN.md) for the CGA/TTL and composite
+hardware test procedure. The ACV-BMP4 palette-flip timing investigation is
+separate and remains paused; ACV-BMP is the stable ACV viewer.
+
+<p>
+<em>ACV-BMP on CGA/TTL output — fixed IRGB colors</em><br>
+<img src="Screenshots/ACV-BMP-CGA-1.png" width="60%" alt="ACV-BMP CGA/TTL output">
+</p>
+
+<p>
+<em>ACV-BMP on CGA/TTL output — alternate image</em><br>
+<img src="Screenshots/ACV-BMP-CGA-2.png" width="60%" alt="ACV-BMP alternate CGA/TTL output">
 </p>
 
 ### PC1-BMP2 — Flip-First Technique
@@ -72,7 +110,7 @@ PC1-BMP2 filename.bmp
 
 <p>
 <em>PC1-BMP2 flip-first</em><br>
-<img src="pc1-bmp2.jpg" width="60%" alt="PC1-BMP2 flip-first">
+<img src="Screenshots/pc1-bmp2.jpg" width="60%" alt="PC1-BMP2 flip-first">
 </p>
 
 ### PC1-BMP3 — Flip-First + Dithering
@@ -91,7 +129,7 @@ PC1-BMP3 filename.bmp
 
 <p>
 <em>PC1-BMP3 dithering</em><br>
-<img src="pc1-bmp3.jpg" width="60%" alt="PC1-BMP3 dithering">
+<img src="Screenshots/pc1-bmp3.jpg" width="60%" alt="PC1-BMP3 dithering">
 </p>
 
 ### PC1-BMP4 — Flip-First with 512-Color Support ⭐ (Best Quality)
@@ -114,7 +152,7 @@ PC1-BMP4 filename.bmp
 
 <p>
 <em>PC1-BMP4 loading screen</em><br>
-<img src="PC1-BMP4-loading%20screen.png" width="60%" alt="PC1-BMP4 loading screen">
+<img src="Screenshots/PC1-BMP4-loading%20screen.png" width="60%" alt="PC1-BMP4 loading screen">
 </p>
 
 ### Old Versions
@@ -180,6 +218,7 @@ nasm -f bin -o PC1-BMP.com PC1-BMP.asm
 nasm -f bin -o PC1-BMP2.com PC1-BMP2.asm
 nasm -f bin -o PC1-BMP3.com PC1-BMP3.asm
 nasm -f bin -o PC1-BMP4.com PC1-BMP4.asm
+nasm -f bin -o bin\ACV-BMP.COM -l bin\ACV-BMP.lst ACV-BMP.asm
 ```
 
 ## Supported BMP Format
